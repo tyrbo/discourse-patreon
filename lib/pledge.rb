@@ -49,6 +49,7 @@ module ::Patreon
         end
 
         pledges_data << pledge_data if pledge_data.present?
+        raise ArgumentError.new("broken response") unless pledge_data.present? and not pledge_data.key?(:error)
       end
 
       save!(pledges_data)

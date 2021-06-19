@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'faraday'
 
 module ::Patreon
 
@@ -28,10 +29,28 @@ module ::Patreon
         limiter_day.performed!
       end
 
-      response = Faraday.new(
+      retry_options = {
+        max: 4,
+        interval: 2,
+        interval_randomness: 1,
+        backoff_factor: 2,
+        retry_statuses: [502, 504, 500, 503],
+        exceptions: [
+          Errno::ETIMEDOUT, 'Timeout::Error',
+          Faraday::TimeoutError, Faraday::RetriableResponse,
+          Faraday::ServerError
+        ]
+      }
+
+      conn = Faraday.new(
         url: 'https://api.patreon.com',
         headers: { 'Authorization' => "Bearer #{SiteSetting.patreon_creator_access_token}" }
-      ).get(uri)
+      ) do |c|
+        c.use Faraday::Response::RaiseError
+        c.request :retry, retry_options
+      end
+
+      response = conn.get(uri)
 
       limiter_hr.performed!
       limiter_day.performed!
