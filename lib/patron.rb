@@ -50,7 +50,9 @@ module ::Patreon
         end
 
         User.where(id: (group_user_ids - user_ids)).each do |user|
-          group.remove user
+          if Patreon::Pledge::Expiration.is_expired?(user_id: user.id)
+            group.remove user
+          end
         end
       end
     end
@@ -88,7 +90,9 @@ module ::Patreon
         if is_member && !is_existing_member
           group.add user
         elsif !is_member && is_existing_member
-          group.remove user
+          if Patreon::Pledge::Expiration.is_expired?(user_id: user.id)
+            group.remove user
+          end
         end
       end
     end
