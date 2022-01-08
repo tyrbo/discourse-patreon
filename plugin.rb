@@ -192,6 +192,10 @@ after_initialize do
     end
   end
 
+  add_to_serializer(:admin_detailed_user, :patreon_expires_on, false) do
+    ::Patreon::Pledge::Expiration.get_expiration(user_id: object.id)
+  end
+
   add_to_serializer(:admin_detailed_user, :patreon_email_exists, false) do
     ::Patreon::Patron.attr("email", object).present?
   end

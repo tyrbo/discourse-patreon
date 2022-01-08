@@ -33,6 +33,12 @@
       <div class="value">{{model.patreon_rewards}}</div>
     </div>
   {{/if}}
+  {{#if model.patreon_expires_on}}
+    <div class="display-row">
+      <div class="field">{{i18n "patreon.field.expires_on"}}</div>
+      <div class="value">{{raw-date model.patreon_expires_on}}</div>
+    </div>
+  {{/if}}
   {{#if model.patreon_declined_since}}
     <div class="display-row">
       <div class="field">{{i18n "patreon.field.declined_since"}}</div>
