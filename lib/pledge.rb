@@ -36,7 +36,7 @@ module ::Patreon
         expiration_date = last_charge_date + attrs['pledge_cadence'].months
 
         if expiration_date > Time.current
-          user = Patreon::Patron.get_local_user(patron_id)
+          user = User.joins(:_custom_fields).find_by(user_custom_fields: { name: 'patreon_id', value: patron_id })
 
           unless user.nil?
             Expiration.set_expiration(user_id: user.id, expiration: expiration_date.iso8601)
@@ -84,7 +84,7 @@ module ::Patreon
 
         new_reward_users.each do |reward_id, patron_ids|
           patron_ids.each do |patron_id|
-            user = Patreon::Patron.get_local_user(patron_id)
+            user = User.joins(:_custom_fields).find_by(user_custom_fields: { name: 'patreon_id', value: patron_id })
 
             unless user.nil?
               Expiration.clear_expiration(user_id: user.id)
