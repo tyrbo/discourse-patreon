@@ -12,8 +12,12 @@ module ::Patreon
     ACCESS_TOKEN_INVALID = "dashboard.patreon.access_token_invalid".freeze
     INVALID_RESPONSE = "patreon.error.invalid_response".freeze
 
+    def self.build_members_uri(campaign_id)
+        "/oauth2/v2/campaigns/#{campaign_id}/members?include=currently_entitled_tiers,user&fields[member]=currently_entitled_amount_cents,email,last_charge_date,last_charge_status"
+    end
+
     def self.campaign_data
-      get('/oauth2/api/current_user/campaigns?include=rewards,creator,goals,pledges&page[count]=100')
+      get('/oauth2/v2/campaigns?include=tiers&fields[tier]=amount_cents,title&page[count]=100')
     end
 
     def self.get(uri)
