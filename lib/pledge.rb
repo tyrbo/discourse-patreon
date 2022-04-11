@@ -31,19 +31,6 @@ module ::Patreon
         end
       end
 
-      if attrs['last_charge_status'] == 'Paid' && !attrs['last_charge_date'].nil?
-        last_charge_date = Time.iso8601(attrs['last_charge_date'])
-        expiration_date = last_charge_date + attrs['pledge_cadence'].months
-
-        if expiration_date > Time.current
-          user = User.joins(:_custom_fields).find_by(user_custom_fields: { name: 'patreon_id', value: patron_id })
-
-          unless user.nil?
-            Expiration.set_expiration(user_id: user.id, expiration: expiration_date.iso8601)
-          end
-        end
-      end
-
       Patreon.set("pledges", all.except(patron_id))
       Decline.set(Decline.all.except(patron_id))
       Patreon.set("users", Patreon::Patron.all.except(patron_id))
@@ -82,16 +69,6 @@ module ::Patreon
         pledges.merge!(new_pledges)
         declines.merge!(new_declines)
         users.merge!(new_users)
-
-        new_reward_users.each do |reward_id, patron_ids|
-          patron_ids.each do |patron_id|
-            user = User.joins(:_custom_fields).find_by(user_custom_fields: { name: 'patreon_id', value: patron_id })
-
-            unless user.nil?
-              Expiration.clear_expiration(user_id: user.id)
-            end
-          end
-        end
 
         Patreon::Reward.all.keys.each do |key|
           reward_users[key] = (reward_users[key] || []) + (new_reward_users[key] || [])
@@ -159,35 +136,6 @@ module ::Patreon
         Patreon.set(KEY, value)
       end
 
-    end
-
-    class Expiration
-      KEY = "expirations".freeze
-
-      def self.all
-        Patreon.get(KEY) || {}
-      end
-
-      def self.clear_expiration(user_id:)
-        expirations = self.all
-        expirations.delete(user_id.to_s)
-        Patreon.set(KEY, expirations)
-      end
-
-      def self.get_expiration(user_id:)
-        self.all[user_id.to_s]
-      end
-
-      def self.is_expired?(user_id:)
-        expiration = self.get_expiration(user_id: user_id)
-        expiration.nil? || Time.current >= expiration
-      end
-
-      def self.set_expiration(user_id:, expiration:)
-        expirations = self.all
-        expirations[user_id.to_s] = expiration
-        Patreon.set(KEY, expirations)
-      end
     end
   end
 end
