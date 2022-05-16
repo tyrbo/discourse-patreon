@@ -31,26 +31,14 @@ module ::Patreon
         end
       end
 
-      if attrs['last_charge_status'] == 'Paid' && !attrs['last_charge_date'].nil?
-        last_charge_date = Time.iso8601(attrs['last_charge_date'])
-        expiration_date = last_charge_date + attrs['pledge_cadence'].months
-
-        if expiration_date > Time.current
-          user = Patreon::Patron.get_local_user(patron_id)
-
-          unless user.nil?
-            Expiration.set_expiration(user_id: user.id, expiration: expiration_date.iso8601)
-          end
-        end
-      end
-
       Patreon.set("pledges", all.except(patron_id))
       Decline.set(Decline.all.except(patron_id))
       Patreon.set("users", Patreon::Patron.all.except(patron_id))
       Patreon.set("reward-users", reward_users)
     end
 
-    def self.pull!(uris)
+    def self.pull!(campaign_ids)
+      uris = campaign_ids.map { |id| Patreon::Api.build_members_uri(id) }
       pledges_data = []
 
       uris.each do |uri|
@@ -82,16 +70,6 @@ module ::Patreon
         declines.merge!(new_declines)
         users.merge!(new_users)
 
-        new_reward_users.each do |reward_id, patron_ids|
-          patron_ids.each do |patron_id|
-            user = Patreon::Patron.get_local_user(patron_id)
-
-            unless user.nil?
-              Expiration.clear_expiration(user_id: user.id)
-            end
-          end
-        end
-
         Patreon::Reward.all.keys.each do |key|
           reward_users[key] = (reward_users[key] || []) + (new_reward_users[key] || [])
         end
@@ -106,39 +84,28 @@ module ::Patreon
     end
 
     def self.extract(pledge_data)
-      pledges, declines, reward_users, users = {}, {}, {}, {}
+      pledges, declines, users = {}, {}, {}, {}
+      reward_users = Hash.new { |h, k| h[k] = [] }
 
       if pledge_data && pledge_data["data"].present?
         pledge_data['data'] = [pledge_data['data']] unless pledge_data['data'].kind_of?(Array)
 
         # get pledges info
         pledge_data['data'].each do |entry|
-          if entry['type'] == 'pledge'
-            patron_id = entry['relationships']['patron']['data']['id']
-            attrs = entry['attributes']
+          next if entry['relationships']['currently_entitled_tiers']['data'].empty?
 
-            (reward_users[entry['relationships']['reward']['data']['id']] ||= []) << patron_id unless entry['relationships']['reward']['data'].nil?
-            pledges[patron_id] = attrs['amount_cents']
-            declines[patron_id] = attrs['declined_since'] if attrs['declined_since'].present?
-          elsif entry['type'] == 'member'
+          if entry['type'] == 'member'
             patron_id = entry['relationships']['user']['data']['id']
             attrs = entry['attributes']
 
-            currently_entitled_tiers = entry['relationships']['currently_entitled_tiers'] || {}
-            (currently_entitled_tiers['data'] || []).each do |tier|
-              (reward_users[tier['id']] ||= []) << patron_id
+            entry['relationships']['currently_entitled_tiers']['data'].each do |tier|
+              reward_users[tier['id']] << patron_id
             end
-            pledges[patron_id] = attrs['pledge_amount_cents']
+            pledges[patron_id] = attrs['currently_entitled_amount_cents']
             declines[patron_id] = attrs['last_charge_date'] if attrs['last_charge_status'] == "Declined"
-          end
-        end
 
-        # get user list too
-        pledge_data['included'].each do |entry|
-          case entry['type']
-          when 'user'
-            if entry['attributes']['email'].present?
-              users[entry['id']] = entry['attributes']['email'].downcase
+            if attrs['email'].present?
+              users[patron_id] = attrs['email'].downcase
             end
           end
         end
@@ -169,35 +136,6 @@ module ::Patreon
         Patreon.set(KEY, value)
       end
 
-    end
-
-    class Expiration
-      KEY = "expirations".freeze
-
-      def self.all
-        Patreon.get(KEY) || {}
-      end
-
-      def self.clear_expiration(user_id:)
-        expirations = self.all
-        expirations.delete(user_id.to_s)
-        Patreon.set(KEY, expirations)
-      end
-
-      def self.get_expiration(user_id:)
-        self.all[user_id.to_s]
-      end
-
-      def self.is_expired?(user_id:)
-        expiration = self.get_expiration(user_id: user_id)
-        expiration.nil? || Time.current >= expiration
-      end
-
-      def self.set_expiration(user_id:, expiration:)
-        expirations = self.all
-        expirations[user_id.to_s] = expiration
-        Patreon.set(KEY, expirations)
-      end
     end
   end
 end
