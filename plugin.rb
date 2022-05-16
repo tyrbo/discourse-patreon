@@ -5,8 +5,8 @@
 # version: 2.0
 # author: Rafael dos Santos Silva <xfalcox@gmail.com>
 # url: https://github.com/discourse/discourse-patreon
+# transpile_js: true
 
-require 'auth/oauth2_authenticator'
 require 'omniauth-oauth2'
 
 enabled_site_setting :patreon_enabled
@@ -77,7 +77,6 @@ after_initialize do
     '../app/jobs/regular/sync_patron_groups.rb',
     '../app/jobs/scheduled/patreon_sync_patrons_to_groups.rb',
     '../app/jobs/scheduled/patreon_update_tokens.rb',
-    '../app/jobs/onceoff/migrate_patreon_user_infos.rb',
     '../lib/api.rb',
     '../lib/seed.rb',
     '../lib/campaign.rb',
@@ -110,73 +109,21 @@ after_initialize do
     get '/u/:username/patreon_email' => 'patreon/patreon_admin#email', constraints: { username: RouteFormat.username }
   end
 
-  class ::OmniAuth::Strategies::Patreon
-    option :name, 'patreon'
+  on(:user_created) do |user|
+    filters = PluginStore.get(PLUGIN_NAME, 'filters')
+    patreon_id = Patreon::Patron.all.key(user.email)
 
-    option :client_options,
-      site: 'https://www.patreon.com',
-      authorize_url: 'https://www.patreon.com/oauth2/authorize',
-      token_url: 'https://api.patreon.com/oauth2/token'
+    if filters.present? && patreon_id.present?
+      begin
+        reward_id = Patreon::RewardUser.all.except('0').detect { |_k, v| v.include? patreon_id }&.first
 
-    option :authorize_params, response_type: 'code'
+        group_ids = filters.select { |_k, v| v.include?(reward_id) || v.include?('0') }.keys
 
-    def custom_build_access_token
-      verifier = request.params['code']
-      client.auth_code.get_token(verifier, redirect_uri: options.redirect_uri)
-    end
+        Group.where(id: group_ids).each { |group| group.add user }
 
-    alias_method :build_access_token, :custom_build_access_token
-
-    uid {
-      raw_info['data']['id'].to_s
-    }
-
-    info do
-      {
-        email: raw_info['data']['attributes']['email'],
-        name: raw_info['data']['attributes']['full_name'],
-        access_token: access_token.token,
-        refresh_token: access_token.refresh_token
-      }
-    end
-
-    extra do
-      {
-        raw_info: raw_info
-      }
-    end
-
-    def raw_info
-      @raw_info ||= begin
-        response = client.request(:get, "https://api.patreon.com/oauth2/api/current_user", headers: {
-            'Authorization' => "Bearer #{access_token.token}"
-        }, parse: :json)
-        response.parsed
-      end
-    end
-
-    def callback_url
-      full_host + script_name + callback_path
-    end
-  end
-
-  DiscourseEvent.on(:user_created) do |user|
-    if SiteSetting.patreon_enabled
-      filters = PluginStore.get(PLUGIN_NAME, 'filters')
-      patreon_id = Patreon::Patron.all.key(user.email)
-
-      if filters.present? && patreon_id.present?
-        begin
-          reward_id = Patreon::RewardUser.all.except('0').detect { |_k, v| v.include? patreon_id }&.first
-
-          group_ids = filters.select { |_k, v| v.include?(reward_id) || v.include?('0') }.keys
-
-          Group.where(id: group_ids).each { |group| group.add user }
-
-          Patreon::Patron.update_local_user(user, patreon_id, true)
-        rescue => e
-          Rails.logger.warn("Patreon group membership callback failed for new user #{self.id} with error: #{e}.\n\n #{e.backtrace.join("\n")}")
-        end
+        Patreon::Patron.update_local_user(user, patreon_id, true)
+      rescue => e
+        Rails.logger.warn("Patreon group membership callback failed for new user #{self.id} with error: #{e}.\n\n #{e.backtrace.join("\n")}")
       end
     end
   end
@@ -207,10 +154,59 @@ after_initialize do
 end
 
 # Authentication with Patreon
-class OmniAuth::Strategies::Patreon < OmniAuth::Strategies::OAuth2
+class ::OmniAuth::Strategies::Patreon < ::OmniAuth::Strategies::OAuth2
+  option :name, 'patreon'
+
+  option :client_options,
+    site: 'https://www.patreon.com',
+    authorize_url: 'https://www.patreon.com/oauth2/authorize',
+    token_url: 'https://api.patreon.com/oauth2/token'
+
+  option :authorize_params, response_type: 'code'
+
+  def custom_build_access_token
+    verifier = request.params['code']
+    client.auth_code.get_token(verifier, redirect_uri: options.redirect_uri)
+  end
+
+  alias_method :build_access_token, :custom_build_access_token
+
+  uid {
+    raw_info['data']['id'].to_s
+  }
+
+  info do
+    {
+      email: raw_info['data']['attributes']['email'],
+      name: raw_info['data']['attributes']['full_name']
+    }
+  end
+
+  extra do
+    {
+      raw_info: raw_info
+    }
+  end
+
+  def raw_info
+    @raw_info ||= begin
+      response = client.request(:get, "https://api.patreon.com/oauth2/api/current_user", headers: {
+          'Authorization' => "Bearer #{access_token.token}"
+      }, parse: :json)
+      response.parsed
+    end
+  end
+
+  def callback_url
+    full_host + script_name + callback_path
+  end
 end
 
-class Auth::PatreonAuthenticator < Auth::OAuth2Authenticator
+class Auth::PatreonAuthenticator < Auth::ManagedAuthenticator
+  def name
+    "patreon"
+  end
+
   def register_middleware(omniauth)
     omniauth.provider :patreon,
                       setup: lambda { |env|
@@ -222,14 +218,14 @@ class Auth::PatreonAuthenticator < Auth::OAuth2Authenticator
                       }
   end
 
-  def after_authenticate(auth_token)
+  def after_authenticate(auth_token, existing_account: nil)
     result = super
 
     user = result.user
     discourse_username = SiteSetting.patreon_creator_discourse_username
     if discourse_username.present? && user && user.username == discourse_username
-      SiteSetting.patreon_creator_access_token = auth_token[:info][:access_token]
-      SiteSetting.patreon_creator_refresh_token = auth_token[:info][:refresh_token]
+      SiteSetting.patreon_creator_access_token = auth_token.credentials["access_token"]
+      SiteSetting.patreon_creator_refresh_token = auth_token.credentials["refresh_token"]
     end
 
     result
@@ -240,4 +236,4 @@ class Auth::PatreonAuthenticator < Auth::OAuth2Authenticator
   end
 end
 
-auth_provider authenticator: Auth::PatreonAuthenticator.new('patreon', trusted: true)
+auth_provider authenticator: Auth::PatreonAuthenticator.new
