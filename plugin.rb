@@ -162,7 +162,10 @@ class ::OmniAuth::Strategies::Patreon < ::OmniAuth::Strategies::OAuth2
     authorize_url: 'https://www.patreon.com/oauth2/authorize',
     token_url: 'https://api.patreon.com/oauth2/token'
 
-  option :authorize_params, response_type: 'code'
+  option :authorize_params, {
+    response_type: 'code',
+    scope: 'identity identity[email]'
+  }
 
   def custom_build_access_token
     verifier = request.params['code']
@@ -190,7 +193,7 @@ class ::OmniAuth::Strategies::Patreon < ::OmniAuth::Strategies::OAuth2
 
   def raw_info
     @raw_info ||= begin
-      response = client.request(:get, "https://api.patreon.com/oauth2/api/current_user", headers: {
+      response = client.request(:get, "https://www.patreon.com/api/oauth2/v2/identity?fields[user]=email,full_name", headers: {
           'Authorization' => "Bearer #{access_token.token}"
       }, parse: :json)
       response.parsed
