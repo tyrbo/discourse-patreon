@@ -2,6 +2,7 @@
 
 require 'json'
 require 'faraday'
+require 'faraday/retry'
 
 module ::Patreon
 
