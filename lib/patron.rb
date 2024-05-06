@@ -127,7 +127,8 @@ module ::Patreon
 
     def self.get_local_users
       users = User.joins("INNER JOIN user_custom_fields cf ON cf.user_id = users.id AND cf.name = 'patreon_id'").pluck("users.id, cf.value")
-      patrons = all.slice!(*users.pluck(1))
+      patreon_ids = Set.new(users.pluck(1))
+      patrons = all.reject { |k, v| patreon_ids.include?(k) }
 
       oauth_users = UserAssociatedAccount.includes(:user).where(provider_name: "patreon")
       oauth_users = oauth_users.where("provider_uid IN (?)", patrons.keys) if patrons.present?
