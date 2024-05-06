@@ -7,7 +7,7 @@
 # url: https://github.com/discourse/discourse-patreon
 # transpile_js: true
 
-gem 'faraday-retry', '2.2.0', {require: false}
+gem 'faraday-retry', '2.2.1', {require: false}
 
 require 'omniauth-oauth2'
 
