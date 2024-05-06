@@ -42,7 +42,13 @@ module ::Patreon
       pledges_data = []
 
       uris.each do |uri|
-        pledge_data = ::Patreon::Api.get(uri)
+        begin
+          retries ||= 0
+          pledge_data = ::Patreon::Api.get(uri)
+        rescue
+          retry if (retries += 1) < 5
+          raise
+        end
 
         # get next page if necessary and add to the current loop
         if pledge_data['links'] && pledge_data['links']['next']
